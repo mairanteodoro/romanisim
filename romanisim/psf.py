@@ -15,9 +15,10 @@ from romanisim.models import ipc
 from .models.bandpass import getBandpasses, galsim2roman_bandpass, roman2galsim_bandpass
 from .models.parameters import (
     default_date,
-    reference_data,
     n_pix,
+    n_sca,
     pixel_scale,
+    reference_data,
 )
 from .models.psf_utils import getPSF
 
@@ -34,7 +35,8 @@ __all__ =  ['VariablePSF',
             'make_one_psf_stpsf',
             'make_psf',
             'psf_from_grid',
-            'psfstamp_to_galsimimage',]
+            'psfstamp_to_galsimimage',
+            'sca_to_crds_detector',]
 
 
 class VariablePSF:
@@ -375,6 +377,37 @@ class ConstantPSF(VariablePSF):
         super().build_epsf_interpolator(image, **kw)
 
 
+def sca_to_crds_detector(sca):
+    """Map an SCA index to the detector name CRDS expects.
+
+    Historical simulation code and STPSF still use SCA numbering (1–18),
+    but CRDS ePSF (and related) selectors are keyed on ``WFI01``–``WFI18``.
+    Sending ``SCA02`` fails with a lookup error against current contexts.
+
+    Parameters
+    ----------
+    sca : int or str
+        SCA number (1–18) or a detector string such as ``"SCA02"`` / ``"WFI02"``.
+
+    Returns
+    -------
+    str
+        Detector name in CRDS form, e.g. ``"WFI02"``.
+    """
+    if isinstance(sca, str):
+        name = sca.strip().upper()
+        if name.startswith("WFI"):
+            return name
+        if name.startswith("SCA"):
+            sca = int(name[3:])
+        else:
+            sca = int(name)
+    sca = int(sca)
+    if sca < 1 or sca > n_sca:
+        raise ValueError(f"Invalid SCA {sca}; expected 1–{n_sca}")
+    return f"WFI{sca:02d}"
+
+
 @cache
 def get_epsf_from_crds(sca, filter_name, date=None):
     """Retrieve EPSF reference model from CRDS
@@ -405,9 +438,11 @@ def get_epsf_from_crds(sca, filter_name, date=None):
             "No date has been specified for CRDS EPSF retrieval. Using %s",
             date.isot,
         )
+    detector = sca_to_crds_detector(sca)
     header = {
         "ROMAN.META.INSTRUMENT.NAME": "wfi",
-        "ROMAN.META.INSTRUMENT.DETECTOR": f"WFI{sca:02d}",
+        # CRDS keys on WFI##, not SCA## (see sca_to_crds_detector).
+        "ROMAN.META.INSTRUMENT.DETECTOR": detector,
         "ROMAN.META.INSTRUMENT.OPTICAL_ELEMENT": galsim2roman_bandpass[
             filter_name
         ],
